@@ -5,7 +5,7 @@ require_once(EXTENSIONS . '/email_sendgrid/vendor/autoload.php');
 class SendGridGateway extends EmailGateway
 {
     const SETTINGS_GROUP = 'email_sendgrid';
-    
+
     public function about()
     {
         return array(
@@ -19,27 +19,42 @@ class SendGridGateway extends EmailGateway
             $from_email = Symphony::Configuration()->get('from_address', self::SETTINGS_GROUP);
             $this->setSenderEmailAddress($from_email);
         }
-        
+
         if (empty($this->_sender_name)) {
             $from_name = Symphony::Configuration()->get('from_name', self::SETTINGS_GROUP);
             $this->setSenderName($from_name);
         }
-        
+
+        if (!empty($this->_reply_to_name) && !empty($this->_reply_to_email_address)) {
+          $reply_to = new SendGrid\ReplyTo($this->_reply_to_email_address, $this->_reply_to_name);
+        }
+
+        if (!empty($this->_attachments)) {
+          $attachments = $this->_attachments;
+          $attachment = new SendGrid\Attachment();
+          $filepath = $attachments[0]['file'];
+          $attachment->setContent(base64_encode(file_get_contents($filepath)));
+          $attachment->setFilename(basename($filepath));
+          $attachment->setType(mime_content_type($filepath));
+          $attachment->setDisposition('attachment');
+          $attachment->setContentId('Applicant CV');;
+        }
+
         $this->validate();
-        
+
         // build from address
         $from = new SendGrid\Email($from_name, $from_email);
-        
+
         // only set HTML body if it exists
         if (!empty($this->_text_html)) {
             $content = new SendGrid\Content("text/html", $this->_text_html);
         } else {
             $content = new SendGrid\Content("text/plain", $this->_text_plain);
         }
-        
+
         $apiKey = Symphony::Configuration()->get('api_key', self::SETTINGS_GROUP);
         $sg = new \SendGrid($apiKey);
-        
+
         // Send individual emails
         foreach ($this->_recipients as $name => $address) {
             if (is_numeric($name)) {
@@ -49,7 +64,14 @@ class SendGridGateway extends EmailGateway
                 $to = new SendGrid\Email($name, $address);
             }
             $mail = new SendGrid\Mail($from, $this->_subject, $to, $content);
+            if (isset($reply_to)) {
+              $mail->setReplyTo($reply_to);
+            }
+            if (isset($attachment)) {
+              $mail->addAttachment($attachment);
+            }
             $response = $sg->client->mail()->send()->post($mail);
+
             // handle bad responses (202 == Continue)
             if ($response->statusCode() !== 202) {
                 throw new EmailGatewayException(
@@ -57,7 +79,7 @@ class SendGridGateway extends EmailGateway
                 );
             }
         }
-        
+
         return true;
     }
 
